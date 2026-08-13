@@ -104,6 +104,16 @@
     return i;
   }
 
+  // A picked result may be from a dictionary the caller does not offer; the pick handler
+  // decides what to do with it, so it can switch dictionary as well as id.
+  function findButton(onPick, preferDict) {
+    const b = el('button', { className: 'findbtn' }, '🔍 Find a marker that looks like…');
+    b.onclick = () => openSearch(onPick, preferDict());
+    const wrap = el('div', { className: 'btnrow' });
+    wrap.appendChild(b);
+    return wrap;
+  }
+
   function row(label, control) {
     const r = el('div', { className: 'row' });
     r.appendChild(el('label', {}, label));
@@ -120,10 +130,14 @@
       c.appendChild(row('Dictionary', dictSelect(ARUCO_KEYS, state.dict, v => state.dict = v)));
       c.appendChild(row('Marker ID', numInput(state.id, 0, 1023, 1, v => state.id = v)));
       c.appendChild(row('Quiet zone (modules)', numInput(state.quietModules, 0, 4, 1, v => state.quietModules = v)));
+      c.appendChild(findButton(r => { state.dict = r.dict; state.id = r.id; renderControls(); update(); },
+                               () => state.dict));
     } else if (f === 'april') {
       c.appendChild(row('Family', dictSelect(APRIL_KEYS, state.aprilDict, v => state.aprilDict = v)));
       c.appendChild(row('Marker ID', numInput(state.id, 0, 2319, 1, v => state.id = v)));
       c.appendChild(row('Quiet zone (modules)', numInput(state.quietModules, 0, 4, 1, v => state.quietModules = v)));
+      c.appendChild(findButton(r => { state.aprilDict = r.dict; state.id = r.id; renderControls(); update(); },
+                               () => state.aprilDict));
     } else if (f === 'april3') {
       const s = el('select');
       for (const k of AT3_KEYS) {
@@ -226,6 +240,11 @@
       innerSel.onchange = () => { q.innerDict = innerSel.value; renderControls(); update(); };
       c.appendChild(row('Hidden tag', innerSel));
       c.appendChild(row('Tag ID', numInput(q.innerId, 0, 999, 1, setLeafId)));
+      c.appendChild(findButton(r => {
+        if (INNER_KEYS.includes(r.dict)) q.innerDict = r.dict;
+        q.innerId = r.id;
+        renderControls(); update();
+      }, () => q.innerDict));
       c.appendChild(row('Tag size (% of QR)', numInput(q.ratioPct, 10, 60, 1, v => q.ratioPct = v)));
       c.appendChild(row('Quiet zone (modules)', numInput(q.quiet, 2, 8, 1, v => q.quiet = v)));
 
@@ -358,6 +377,133 @@
     $('#mintBtn').disabled = state.cart.length === 0;
   }
 
+  // ---- visual search modal ----
+  // `onPick` decides where a chosen tag lands: the main controls, or the nested stack's
+  // hidden tag, depending on which button opened the modal.
+  const searchState = { tab: 'concept', sketch: null, n: 6, onPick: null };
+
+  const SEARCHABLE = ['april_36h11', 'april_36h10', '4x4_1000', '5x5_1000',
+                      '6x6_1000', '7x7_1000', 'aruco'];
+
+  function openSearch(onPick, preferDict) {
+    searchState.onPick = onPick;
+    const sel = $('#searchDict');
+    if (!sel.options.length) {
+      sel.appendChild(el('option', { value: '*' }, 'all indexed dictionaries'));
+      for (const k of SEARCHABLE)
+        sel.appendChild(el('option', { value: k }, window.ARUCO_DICTS[k].label));
+      sel.onchange = () => buildSketchGrid();
+    }
+    if (preferDict && SEARCHABLE.includes(preferDict)) sel.value = preferDict;
+    buildSketchGrid();
+    $('#searchModal').style.display = 'flex';
+    $('#searchStatus').textContent = '';
+    $('#searchResults').innerHTML = '';
+    if (searchState.tab === 'concept') $('#conceptQuery').focus();
+    TagSearch.load().catch(e => { $('#searchStatus').textContent = e.message; });
+  }
+
+  function closeSearch() { $('#searchModal').style.display = 'none'; }
+
+  function dictsToSearch() {
+    const v = $('#searchDict').value;
+    return v === '*' ? SEARCHABLE : [v];
+  }
+
+  function buildSketchGrid() {
+    const keys = dictsToSearch();
+    // Sketching needs one module size; with "all" selected, use the commonest (6x6).
+    const n = keys.length === 1 ? window.ARUCO_DICTS[keys[0]].width : 6;
+    searchState.n = n;
+    searchState.sketch = new Array(n * n).fill(null);
+    const g = $('#sketchGrid');
+    g.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+    g.innerHTML = '';
+    for (let i = 0; i < n * n; i++) {
+      const cell = el('div');
+      cell.onclick = () => {
+        const cur = searchState.sketch[i];
+        const next = cur === null ? 1 : cur === 1 ? 0 : null;
+        searchState.sketch[i] = next;
+        cell.className = next === 1 ? 'on' : next === 0 ? 'off' : '';
+      };
+      g.appendChild(cell);
+    }
+  }
+
+  function showHits(results, note) {
+    const box = $('#searchResults');
+    box.innerHTML = '';
+    $('#searchStatus').textContent = note;
+    for (const r of results) {
+      const tile = Render.gridTag(r.dict, r.id, 1);
+      const hit = el('div', { className: 'hit' });
+      hit.innerHTML = rotatedSvg(tile, r.rot);
+      const pct = (r.score * 100).toFixed(0);
+      hit.appendChild(el('div', { className: 'cap' },
+        `${window.ARUCO_DICTS[r.dict].label.replace(/ \(\d+\)/, '')}<br>#${r.id}` +
+        `${r.rot ? ' · ' + r.rot * 90 + '°' : ''} · ${pct}%`));
+      hit.onclick = () => { searchState.onPick(r); closeSearch(); };
+      box.appendChild(hit);
+    }
+  }
+
+  // The index scores rotations, so show the winning rotation rather than the stored one.
+  function rotatedSvg(tile, rot) {
+    const svg = SvgOut.toSvg(tile, 40);
+    if (!rot) return svg;
+    return svg.replace('<rect x="0"',
+      `<g transform="rotate(${rot * 90} ${tile.wu / 2} ${tile.wu / 2})"><rect x="0"`)
+      .replace('</svg>', '</g></svg>');
+  }
+
+  function runConcept() {
+    const q = $('#conceptQuery').value.trim();
+    if (!q) return;
+    $('#searchStatus').textContent = 'searching…';
+    TagSearch.load().then(() => {
+      const r = TagSearch.concept(q, dictsToSearch());
+      if (!r.results.length) {
+        showHits([], `No vocabulary entry for ${r.unmatched.map(w => `"${w}"`).join(', ')} — ` +
+                     `try a shape, object or texture word.`);
+        return;
+      }
+      let note = `matched on ${r.used.join(', ')} (${r.mode})`;
+      if (r.unmatched.length) note += ` · ignored ${r.unmatched.join(', ')}`;
+      // Nothing standing out above the noise floor is what a meaningless query looks
+      // like, so say so rather than presenting the top of a flat distribution.
+      if (r.mode !== 'structural' && r.topZ < 2.5)
+        note += ' · weak signal, these may not really resemble the query';
+      showHits(r.results, note);
+    }).catch(e => { $('#searchStatus').textContent = e.message; });
+  }
+
+  function runSketch() {
+    const set = searchState.sketch.filter(v => v !== null).length;
+    if (!set) { $('#searchStatus').textContent = 'Set at least one cell first.'; return; }
+    const keys = dictsToSearch().filter(k => window.ARUCO_DICTS[k].width === searchState.n);
+    const r = TagSearch.sketch(searchState.sketch, searchState.n, keys);
+    showHits(r.results, `${r.specified} cells specified · matching ${keys.length} ` +
+                        `${searchState.n}x${searchState.n} dictionar${keys.length === 1 ? 'y' : 'ies'}`);
+  }
+
+  function initSearchModal() {
+    $('#searchClose').onclick = closeSearch;
+    $('#searchModal').onclick = e => { if (e.target.id === 'searchModal') closeSearch(); };
+    $('#conceptGo').onclick = runConcept;
+    $('#conceptQuery').onkeydown = e => { if (e.key === 'Enter') runConcept(); };
+    $('#sketchGo').onclick = runSketch;
+    $('#sketchClear').onclick = buildSketchGrid;
+    for (const t of document.querySelectorAll('.tab')) {
+      t.onclick = () => {
+        searchState.tab = t.dataset.tab;
+        for (const o of document.querySelectorAll('.tab')) o.classList.toggle('active', o === t);
+        $('#tabConcept').style.display = searchState.tab === 'concept' ? '' : 'none';
+        $('#tabSketch').style.display = searchState.tab === 'sketch' ? '' : 'none';
+      };
+    }
+  }
+
   // ---- wire up ----
   function init() {
     const famSel = $('#family');
@@ -396,6 +542,7 @@
         skipped.map(i => i.label).join('\n'));
     };
 
+    initSearchModal();
     renderControls();
     update();
     renderCart();

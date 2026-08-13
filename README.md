@@ -18,9 +18,14 @@ Open `index.html` in a browser. No build step, no server, no network — double-
 | ArUco grid board | any ArUco dict | matches `cv2.aruco.GridBoard` |
 | Nested / concealed | QR + RuneTag + any grid tag | markers hidden inside other markers — see below |
 
+Any grid family also has a **visual search** — find a marker that looks like a face, a
+checkerboard, an arrow — see below.
+
 All commercially usable: ArUco dictionaries are OpenCV (Apache-2), AprilTag is BSD-2
 (AprilRobotics), RuneTag's reference implementation is MIT (github.com/artursg/RUNEtag).
-Vendored libraries: jsPDF (MIT), qrcode-generator (MIT), jsQR (Apache-2).
+Vendored libraries: jsPDF (MIT), qrcode-generator (MIT), jsQR (Apache-2). The visual
+search index is built with OpenCLIP (MIT) using LAION-2B weights; only the resulting
+vectors are shipped, not the model.
 
 ## Size sweep
 
@@ -67,6 +72,57 @@ it with the actual devices you care about before settling on a configuration.
 
 **Add matrix to sheet** queues every ECC level against a list of tag sizes, so one printed
 page answers the question for your own hardware.
+
+## Finding a marker that looks like something
+
+Some markers happen to resemble real objects. **🔍 Find a marker that looks like…** lets you
+go looking for them, either by describing what you want or by sketching it.
+
+**Describe it** runs two scorers and tells you which one answered:
+
+- *Semantic* — CLIP ViT-B-32 vectors, computed offline for every tag in every rotation
+  (`tools/embed_tags.py`) and shipped as a 2MB int8 index that loads only when you open
+  the search panel. Nothing is downloaded at runtime.
+- *Structural* — descriptors computed from the bits in the browser: symmetry, density, run
+  lengths, connected components, border bias. Words like `checkerboard`, `dense`,
+  `symmetric`, `diagonal`, `hollow`, `scattered` route here, where the answer is exact.
+
+**Sketch it** is a third mode with no model at all: click cells on a grid to set dark,
+light or don't-care, and it ranks every tag by agreement across all four rotations. Feeding
+a real tag's own pattern back in returns that tag at 100%, which the test suite checks.
+
+### How well does CLIP actually work here?
+
+CLIP was trained on photographs, and a marker is 36 bits upscaled, so this was validated
+before being built on (`tools/embed_probe.py`, contact sheets in `tools/probe_out/`).
+
+The signal is real but uneven. `a smiling face`, `a checkerboard` and `a diagonal stripe`
+return convincing matches. `a hollow square` and `a staircase` returned a nearly flat score
+distribution — the signature of noise — which is why geometric terms are handled
+structurally instead.
+
+Two things make the semantic results usable:
+
+- **Rotation matters**, so all four are indexed and the winning one is shown and applied.
+- **Hubness is corrected.** Raw cosine is dominated by a handful of tags sitting near the
+  centre of the embedding: one tag took 12% of all top-5 slots and the entire vocabulary
+  only ever surfaced 100 distinct tags. Each tag is z-scored against its own similarity
+  distribution over the vocabulary, which lifts that to 390 distinct tags with the worst
+  hub down to 1%. `tools/verify_search.py` asserts this so it cannot regress.
+
+When nothing stands out above a tag's own noise floor the results are labelled **weak
+signal** rather than presented as matches. Trust the picture, not the percentage.
+
+The vocabulary is fixed (~170 terms) because the text encoder stays offline. Unrecognised
+words are reported, not silently dropped.
+
+### Rebuilding the index
+
+```
+python tools/embed_tags.py            # ~20 min on CPU, downloads CLIP weights once
+python tools/embed_tags.py --repack   # re-quantise from cached vectors, seconds
+python tools/verify_search.py
+```
 
 ## How small can a tag go?
 
@@ -158,6 +214,7 @@ Requires `opencv-python`, `numpy`, `pypdfium2`, and Node.
 node tools/verify.mjs     && python tools/verify.py       # bit-level correctness
 node tools/verify_qr.mjs  && python tools/verify_qr.py    # QR concealment robustness
 python tools/verify_limits.py                             # minimum detectable size
+python tools/verify_search.py                             # visual search index
 node tools/verify_pdf.mjs && python tools/verify_pdf.py   # print geometry
 node tools/verify_ui.mjs                                  # browser smoke test (needs playwright)
 ```

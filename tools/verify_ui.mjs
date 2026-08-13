@@ -45,6 +45,41 @@ for (const fam of families) {
   await page.screenshot({ path: path.join(outDir, `${fam}.png`) });
 }
 
+// Visual search: sketch mode needs no index, concept mode lazy-loads it.
+await page.selectOption('#family', 'april');
+await page.waitForTimeout(150);
+await page.click('.findbtn');
+await page.waitForTimeout(400);
+if (!(await page.locator('#searchModal').isVisible())) errors.push('search modal did not open');
+
+await page.click('.tab[data-tab="sketch"]');
+await page.waitForTimeout(150);
+const cells = page.locator('#sketchGrid div');
+for (const i of [0, 1, 6, 7]) await cells.nth(i).click();
+await page.click('#sketchGo');
+await page.waitForTimeout(400);
+let hits = await page.locator('.hit').count();
+console.log('sketch search hits:', hits, '|', await page.textContent('#searchStatus'));
+if (!hits) errors.push('sketch search returned nothing');
+
+await page.click('.tab[data-tab="concept"]');
+await page.fill('#conceptQuery', 'checkerboard');
+await page.click('#conceptGo');
+await page.waitForTimeout(2500);           // first query pulls in the index
+hits = await page.locator('.hit').count();
+const status = await page.textContent('#searchStatus');
+console.log('concept search hits:', hits, '|', status);
+if (!hits) errors.push(`concept search returned nothing: ${status}`);
+await page.screenshot({ path: path.join(outDir, 'search.png') });
+
+// Picking a result must load it into the controls and close the modal.
+if (hits) {
+  await page.locator('.hit').first().click();
+  await page.waitForTimeout(300);
+  if (await page.locator('#searchModal').isVisible()) errors.push('modal stayed open after picking');
+  console.log('after pick:', (await page.textContent('#previewMeta')).slice(0, 70));
+}
+
 // QR concealment: the live decode badge must say the symbol still reads, and adding a
 // RuneTag layer must build the nested stack without error.
 await page.selectOption('#family', 'qrtag');

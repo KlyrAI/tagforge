@@ -13,3 +13,7 @@ tools/verify_sheet_page*.png
 tools/ref_imgs/
 tools/ui_out/
 tools/nested_out/
+tools/probe_out/
+tools/probe_vecs.npy
+tools/tag_search_float.npz
+tools/sem_hits.json

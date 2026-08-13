@@ -54,6 +54,32 @@
            padding: 6px 4px 6px 9px; font-size: 12.5px; border-bottom: 1px solid var(--edge); }
   .layer:last-child { border-bottom: none; }
   .layer.leaf { color: var(--accent); }
+
+  .modal { position: fixed; inset: 0; background: #000b; display: flex; align-items: center;
+           justify-content: center; z-index: 50; padding: 20px; }
+  .modal .sheet { background: var(--bg); border: 1px solid var(--edge); border-radius: 10px;
+                  width: min(920px, 100%); max-height: 90vh; overflow-y: auto; padding: 16px 18px; }
+  .modalhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .modalhead h3 { font-size: 15px; font-weight: 600; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tab { border-radius: 6px 6px 0 0; }
+  .tab.active { border-color: var(--accent); color: var(--accent); }
+  .tabpane { margin-bottom: 4px; }
+  .searchrow { display: flex; gap: 8px; align-items: center; }
+  .searchrow input[type=text] { flex: 1; }
+  .searchrow select { width: auto; min-width: 190px; }
+  .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+             gap: 10px; margin-top: 12px; }
+  .hit { border: 1px solid var(--edge); border-radius: 6px; padding: 6px; cursor: pointer; text-align: center; }
+  .hit:hover { border-color: var(--accent); }
+  .hit svg { width: 100%; height: auto; display: block; background: #fff; border-radius: 3px; }
+  .hit .cap { font-size: 10.5px; color: var(--dim); margin-top: 4px; line-height: 1.3; }
+  .sketchgrid { display: grid; gap: 2px; width: 240px; margin: 8px 0; }
+  .sketchgrid div { aspect-ratio: 1; border: 1px solid var(--edge); border-radius: 2px;
+                    background: #2a2f38; cursor: pointer; }
+  .sketchgrid div.on { background: #000; border-color: #555; }
+  .sketchgrid div.off { background: #fff; border-color: #fff; }
+  .findbtn { font-size: 12.5px; }
   .badge { margin-top: 10px; padding: 5px 12px; border-radius: 20px; font-size: 12.5px; font-weight: 600; }
   .badge.ok { background: #1d3a24; color: #6ee08a; }
   .badge.bad { background: #3d1f1c; color: #ff8f7d; }
@@ -103,6 +129,48 @@
   </div>
 </main>
 
+<div id="searchModal" class="modal" style="display:none">
+  <div class="sheet">
+    <div class="modalhead">
+      <h3>Find a marker by what it looks like</h3>
+      <button class="ghost" id="searchClose" title="close">✕</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="concept">Describe it</button>
+      <button class="tab" data-tab="sketch">Sketch it</button>
+    </div>
+
+    <div class="tabpane" id="tabConcept">
+      <div class="searchrow">
+        <input type="text" id="conceptQuery" placeholder="a face, checkerboard, diagonal stripe, arrow…">
+        <button class="primary" id="conceptGo">Search</button>
+      </div>
+      <p class="hint" id="conceptHint">
+        Semantic matching uses CLIP vectors built offline; words like <em>checkerboard</em>,
+        <em>dense</em>, <em>symmetric</em>, <em>diagonal</em>, <em>hollow</em> are scored
+        structurally from the bits instead, which is exact.
+      </p>
+    </div>
+
+    <div class="tabpane" id="tabSketch" style="display:none">
+      <p class="hint">Click cells to cycle dark → light → don't care. Only the cells you set are matched.</p>
+      <div id="sketchGrid" class="sketchgrid"></div>
+      <div class="btnrow">
+        <button class="primary" id="sketchGo">Find closest</button>
+        <button id="sketchClear">Clear</button>
+      </div>
+    </div>
+
+    <div class="searchrow" style="margin-top:10px">
+      <label class="stacked" style="margin:0">Search in</label>
+      <select id="searchDict"></select>
+    </div>
+
+    <div id="searchStatus" class="hint"></div>
+    <div id="searchResults" class="results"></div>
+  </div>
+</div>
+
 <script src="vendor/jspdf.umd.min.js"></script>
 <script src="vendor/qrcode-generator.min.js"></script>
 <script src="vendor/jsQR.min.js"></script>
@@ -112,6 +180,7 @@
 <script src="js/render.js"></script>
 <script src="js/qrapril.js"></script>
 <script src="js/nest.js"></script>
+<script src="js/search.js"></script>
 <script src="js/svg.js"></script>
 <script src="js/pdf.js"></script>
 <script src="js/app.js"></script>
