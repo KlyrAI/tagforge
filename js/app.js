@@ -31,6 +31,7 @@
     family: 'aruco',
     dict: '6x6_1000', aprilDict: 'april_36h11', at3: 'tagStandard41h12',
     id: 0, quietModules: 1, runeQuietPct: 5, runeId: 1,
+    idRange: '0-9',
     sizeMm: 60,
     sweep: '15, 20, 30, 40, 60, 80, 100',
     qr: { payload: 'https://klyrai.github.io/tagforge/', ecc: 'H', version: 0,
@@ -104,6 +105,69 @@
     return i;
   }
 
+  // "0-9, 12, 20-24" -> [0..9, 12, 20..24]. Ranges may be given either way round.
+  function parseIds(spec, max) {
+    const ids = [];
+    for (const part of spec.split(',')) {
+      const s = part.trim();
+      if (!s) continue;
+      const m = s.match(/^(\d+)\s*(?:-|–|\.\.|to)\s*(\d+)$/);
+      if (m) {
+        let [a, b] = [Number(m[1]), Number(m[2])];
+        if (a > b) [a, b] = [b, a];
+        for (let i = a; i <= b; i++) ids.push(i);
+      } else if (/^\d+$/.test(s)) {
+        ids.push(Number(s));
+      } else {
+        throw new Error(`Cannot read "${s}" — use numbers and ranges like 0-9, 12, 20-24`);
+      }
+    }
+    const uniq = [...new Set(ids)].sort((a, b) => a - b);
+    const over = uniq.filter(i => i >= max);
+    if (over.length) throw new Error(`id ${over[0]} is past the end of this dictionary (max ${max - 1})`);
+    if (!uniq.length) throw new Error('No ids in that range');
+    return uniq;
+  }
+
+  // An ID range plus the size sweep would multiply into hundreds of prints, so the range
+  // is queued at the current print size only.
+  function rangeControls(getDict, setId) {
+    const box = document.createDocumentFragment();
+    const input = el('input', { type: 'text', value: state.idRange, placeholder: '0-9, 12, 20-24' });
+    input.oninput = () => { state.idRange = input.value; };
+    const r = el('div', { className: 'row' });
+    r.appendChild(el('label', {}, 'ID range'));
+    r.appendChild(input);
+    box.appendChild(r);
+
+    const btn = el('button', { className: 'primary' }, 'Add range to sheet');
+    btn.onclick = () => {
+      const dictKey = getDict();
+      const max = dictKey === 'runetag' ? 2001
+        : window.ARUCO_DICTS[dictKey] ? window.ARUCO_DICTS[dictKey].markers.length
+        : window.APRILTAG3[dictKey].embedded;
+      let ids;
+      try {
+        ids = parseIds(state.idRange, max);
+      } catch (e) { alert(e.message); return; }
+      const before = state.cart.length;
+      const keep = state.id;
+      for (const id of ids) {
+        setId(id);
+        addToCart([state.sizeMm]);
+      }
+      setId(keep);
+      update();
+      $('#rangeNote').textContent = `added ${state.cart.length - before} markers at ${state.sizeMm}mm`;
+    };
+    const bar = el('div', { className: 'btnrow' });
+    bar.appendChild(btn);
+    box.appendChild(bar);
+    box.appendChild(el('p', { className: 'hint', id: 'rangeNote' },
+      'Queues every id in the range at the current print size.'));
+    return box;
+  }
+
   // A picked result may be from a dictionary the caller does not offer; the pick handler
   // decides what to do with it, so it can switch dictionary as well as id.
   function findButton(onPick, preferDict) {
@@ -130,12 +194,14 @@
       c.appendChild(row('Dictionary', dictSelect(ARUCO_KEYS, state.dict, v => state.dict = v)));
       c.appendChild(row('Marker ID', numInput(state.id, 0, 1023, 1, v => state.id = v)));
       c.appendChild(row('Quiet zone (modules)', numInput(state.quietModules, 0, 4, 1, v => state.quietModules = v)));
+      c.appendChild(rangeControls(() => state.dict, id => state.id = id));
       c.appendChild(findButton(r => { state.dict = r.dict; state.id = r.id; renderControls(); update(); },
                                () => state.dict));
     } else if (f === 'april') {
       c.appendChild(row('Family', dictSelect(APRIL_KEYS, state.aprilDict, v => state.aprilDict = v)));
       c.appendChild(row('Marker ID', numInput(state.id, 0, 2319, 1, v => state.id = v)));
       c.appendChild(row('Quiet zone (modules)', numInput(state.quietModules, 0, 4, 1, v => state.quietModules = v)));
+      c.appendChild(rangeControls(() => state.aprilDict, id => state.id = id));
       c.appendChild(findButton(r => { state.aprilDict = r.dict; state.id = r.id; renderControls(); update(); },
                                () => state.aprilDict));
     } else if (f === 'april3') {
@@ -149,6 +215,7 @@
       c.appendChild(row('Family', s));
       c.appendChild(row('Marker ID', numInput(state.id, 0, 999, 1, v => state.id = v)));
       c.appendChild(row('Quiet zone (modules)', numInput(state.quietModules, 0, 4, 1, v => state.quietModules = v)));
+      c.appendChild(rangeControls(() => state.at3, id => state.id = id));
     } else if (f === 'runetag') {
       c.appendChild(row('Tag number', numInput(state.runeId, 1, 2000, 1, v => state.runeId = v)));
       c.appendChild(row('Quiet zone (% of ⌀)', numInput(state.runeQuietPct, 0, 25, 1, v => state.runeQuietPct = v)));
@@ -156,6 +223,7 @@
         'Counts through valid RUNE-129 codes — tag 1, 2, 3 are consecutive distinct tags. ' +
         'Only ~1 raw index in 40 is a valid code, so the label shows the actual code number ' +
         'a detector reports (tag 1 = code 24).'));
+      c.appendChild(rangeControls(() => 'runetag', id => state.runeId = id));
     } else if (f === 'qrtag') {
       const q = state.qr;
 
@@ -466,6 +534,19 @@
       if (!r.results.length) {
         showHits([], `No vocabulary entry for ${r.unmatched.map(w => `"${w}"`).join(', ')} — ` +
                      `try a shape, object or texture word.`);
+        return;
+      }
+      if (r.mode === 'glyph') {
+        // Marker codes are built for Hamming distance, which actively avoids the kind of
+        // regular shape a letter is. A few letters have convincing matches, most do not,
+        // so the score is stated plainly rather than dressed up as a hit.
+        const pct = (r.topScore * 100).toFixed(0);
+        const quality = r.topScore >= 0.9 ? 'a good match exists'
+          : r.topScore >= 0.85 ? 'approximate — recognisable at best'
+          : 'no real match in these dictionaries';
+        showHits(r.results, `closest tags to the letter "${r.glyphChar}" — best ${pct}% of ` +
+                            `modules agree, ${quality}. Try "all indexed dictionaries": ` +
+                            `ArUco 5x5 and ARUCO_ORIGINAL carry letters far better than AprilTag.`);
         return;
       }
       let note = `matched on ${r.used.join(', ')} (${r.mode})`;

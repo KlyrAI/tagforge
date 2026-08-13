@@ -17,3 +17,4 @@ tools/probe_out/
 tools/probe_vecs.npy
 tools/tag_search_float.npz
 tools/sem_hits.json
+tools/letters_best.json

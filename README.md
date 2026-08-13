@@ -87,6 +87,19 @@ go looking for them, either by describing what you want or by sketching it.
   lengths, connected components, border bias. Words like `checkerboard`, `dense`,
   `symmetric`, `diagonal`, `hollow`, `scattered` route here, where the answer is exact.
 
+**Letters and digits** get their own scorer. Typing `A`, `letter A` or `digit 7` matches
+against a 3x5 pixel font rather than CLIP — scaling a vector font down to six modules turns
+`T` and `I` into identical solid bars, so the glyphs are specified at the resolution they
+are used at. The whole tile is scored, not just the glyph cells, because an unconstrained
+noisy border stops a tag reading as a letter.
+
+Be realistic about this one: marker codes are built for Hamming distance, which actively
+avoids the kind of regular shape a letter is. Across all ~9k indexed tags the best
+agreement averages 86%, and only a few letters are convincing — `L` (ARUCO_ORIGINAL #64)
+and `U` (ArUco 5x5 #809) genuinely read. Search **all indexed dictionaries** for these:
+ArUco 5x5 and ARUCO_ORIGINAL carry letters far better than AprilTag, whose codes never win.
+The status line states the agreement and whether it amounts to a real match.
+
 **Sketch it** is a third mode with no model at all: click cells on a grid to set dark,
 light or don't-care, and it ranks every tag by agreement across all four rotations. Feeding
 a real tag's own pattern back in returns that tag at 100%, which the test suite checks.
@@ -162,6 +175,13 @@ width and the QR itself is the fragile part. A QR-H with a 35% tag needs roughly
 across the whole symbol — about 60 mm at 0.5 m on a 1080p phone, or 120 mm at 1 m. The
 hidden tag clears its own threshold at less than half that, so the QR is always what sets
 the size.
+
+## Printing many markers at once
+
+**ID range** takes `0-9, 12, 20-24` and queues every id at the current print size — one
+entry per marker, no clicking through ids. Available on ArUco, AprilTag v2/v3 and RuneTag.
+It deliberately does not multiply with the size sweep, which would run to hundreds of
+prints; use one or the other.
 
 ## Print files
 

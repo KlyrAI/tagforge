@@ -162,6 +162,71 @@ const TagSearch = (() => {
     };
   }
 
+  // ---- letters and digits ----
+  // A 3x5 pixel font, the kind designed for tiny displays. Scaling a vector font down to
+  // six modules produces unreadable blobs — "T" and "I" both come out as a solid bar — so
+  // the glyphs are specified at the resolution they will actually be used at.
+  const FONT3x5 = {
+    A: '010101111101101', B: '110101110101110', C: '011100100100011', D: '110101101101110',
+    E: '111100110100111', F: '111100110100100', G: '011100101101011', H: '101101111101101',
+    I: '111010010010111', J: '001001001101010', K: '101101110101101', L: '100100100100111',
+    M: '101111111101101', N: '101111111111101', O: '010101101101010', P: '110101110100100',
+    Q: '010101101111011', R: '110101110101101', S: '011100010001110', T: '111010010010010',
+    U: '101101101101011', V: '101101101101010', W: '101101111111101', X: '101101010101101',
+    Y: '101101010010010', Z: '111001010100111',
+    0: '011101101101110', 1: '010110010010111', 2: '110001010100111', 3: '110001010001110',
+    4: '101101111001001', 5: '111100110001110', 6: '011100110101010', 7: '111001010010010',
+    8: '010101010101010', 9: '010101011001110',
+  };
+
+  // Glyph centred in an n x n grid. Ink maps to a white module, which is how the letter
+  // reads on a printed tag. Needs at least 5 modules, so 4x4 dictionaries are excluded.
+  function glyphTemplate(ch, n) {
+    const rows = FONT3x5[ch];
+    if (!rows || n < 5) return null;
+    const g = new Uint8Array(n * n);
+    const oy = (n - 5) >> 1, ox = (n - 3) >> 1;
+    for (let y = 0; y < 5; y++)
+      for (let x = 0; x < 3; x++) g[(oy + y) * n + ox + x] = +rows[y * 3 + x];
+    return g;
+  }
+
+  // "a", "letter a", "the letter A", "digit 7" -> "A"
+  function asGlyph(query) {
+    const q = query.trim().toUpperCase().replace(/^(THE\s+)?(LETTER|DIGIT|NUMBER|CHARACTER)\s+/, '');
+    return q.length === 1 && FONT3x5[q] ? q : null;
+  }
+
+  // Whole-tile agreement: the glyph cells *and* the background must match, otherwise a
+  // noisy border swamps the shape and the tag stops reading as a letter.
+  function glyph(ch, dictKeys, topN = 24) {
+    const out = [];
+    for (const key of dictKeys) {
+      const dict = window.ARUCO_DICTS[key];
+      if (!dict || dict.width !== dict.height) continue;
+      const n = dict.width;
+      const g = glyphTemplate(ch, n);
+      if (!g) continue;
+      for (let id = 0; id < dict.markers.length; id++) {
+        const grid = bits(key, id);
+        for (let rot = 0; rot < ROTS; rot++) {
+          const r = rotate(grid, n, rot);
+          let hits = 0;
+          for (let i = 0; i < n * n; i++) if ((r[i] ? 1 : 0) === g[i]) hits++;
+          out.push({ dict: key, id, rot, score: hits / (n * n) });
+        }
+      }
+    }
+    const best = new Map();
+    for (const r of out) {
+      const k = r.dict + ':' + r.id;
+      const prev = best.get(k);
+      if (!prev || r.score > prev.score) best.set(k, r);
+    }
+    const results = [...best.values()].sort((a, b) => b.score - a.score).slice(0, topN);
+    return { results, glyphChar: ch, topScore: results.length ? results[0].score : 0 };
+  }
+
   // Structural concepts: each maps a descriptor set to a score in roughly 0..1.
   const STRUCTURAL = {
     'checkerboard': d => d.edges,
@@ -207,22 +272,30 @@ const TagSearch = (() => {
     return edits + (a.length - i) + (b.length - j) <= 1;
   };
 
-  // Resolve a word to a vocabulary key: exact, then prefix, then one typo away.
+  // Resolve a word to a vocabulary key: exact, then plural, then one typo away.
+  // Matching is case-insensitive because some vocabulary keys are capitalised.
   function resolve(word) {
     if (!index) return null;
-    const v = index.vocab;
-    if (v[word]) return word;
-    const keys = Object.keys(v);
-    const pref = keys.find(k => k === word + 's' || word === k + 's' || k.startsWith(word + ' '));
-    if (pref) return pref;
-    const near = keys.find(k => k.length > 3 && levenshtein1(k, word));
-    return near || null;
+    const keys = Object.keys(index.vocab);
+    const lower = keys.map(k => k.toLowerCase());
+    let i = lower.indexOf(word);
+    if (i >= 0) return keys[i];
+    i = lower.findIndex(k => k === word + 's' || word === k + 's');
+    if (i >= 0) return keys[i];
+    i = lower.findIndex(k => k.length > 3 && levenshtein1(k, word));
+    return i >= 0 ? keys[i] : null;
   }
 
   // ---- main entry: concept search ----
   // Returns { results, used, unmatched, mode, spread }
   function concept(query, dictKeys, topN = 24) {
-    const words = query.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 1);
+    // A single character is a glyph request, not a vocabulary word.
+    const ch = asGlyph(query);
+    if (ch) {
+      const g = glyph(ch, dictKeys, topN);
+      return { ...g, used: [`glyph "${ch}"`], unmatched: [], mode: 'glyph', topZ: 0 };
+    }
+    const words = query.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 1);
     const structuralHits = words.filter(w => STRUCTURAL[w]);
     const semanticWords = words.filter(w => !STRUCTURAL[w]);
 
@@ -354,6 +427,7 @@ const TagSearch = (() => {
     };
   }
 
-  return { load, concept, sketch, describe, rotate, bits, isLoaded: () => !!index };
+  return { load, concept, sketch, glyph, glyphTemplate, asGlyph, describe, rotate, bits,
+           FONT3x5, isLoaded: () => !!index };
 })();
 window.TagSearch = TagSearch;

@@ -88,6 +88,39 @@ for (const [sx, sy, legacy] of [[4, 6, true], [4, 6, false], [5, 7, true], [5, 7
 // Grid board: units are mm, 32mm markers / 8mm gap, 1 px/mm
 out.gridboard = { img: raster(Render.gridBoard('6x6_1000', 4, 5, 32, 8, 0, 0), 1), mx: 4, my: 5, markerMm: 32, sepMm: 8 };
 
+// ---- glyph search: templates and routing, no index needed ----
+vm.runInContext(readFileSync(path.join(root, 'js/search.js'), 'utf8'), ctx, { filename: 'search.js' });
+const TagSearch = vm.runInContext('TagSearch', ctx);
+const ALL_DICTS = ['april_36h11', 'april_36h10', '4x4_1000', '5x5_1000', '6x6_1000', '7x7_1000', 'aruco'];
+let glyphFails = 0;
+const gcheck = (name, ok, extra = '') => {
+  console.log((ok ? 'PASS ' : 'FAIL ') + name + (extra ? ' — ' + extra : ''));
+  if (!ok) glyphFails++;
+};
+
+// Every glyph is 15 bits of a 3x5 cell and must place inside the grid.
+for (const [ch, rows] of Object.entries(TagSearch.FONT3x5)) {
+  if (rows.length !== 15) gcheck(`font "${ch}" is 3x5`, false, `${rows.length} cells`);
+}
+gcheck('font covers A-Z and 0-9', Object.keys(TagSearch.FONT3x5).length === 36,
+       `${Object.keys(TagSearch.FONT3x5).length} glyphs`);
+gcheck('glyph needs at least 5 modules', TagSearch.glyphTemplate('A', 4) === null);
+gcheck('"letter A", "A" and "the letter a" all route to the same glyph',
+       TagSearch.asGlyph('letter A') === 'A' && TagSearch.asGlyph('A') === 'A' &&
+       TagSearch.asGlyph('the letter a') === 'A');
+gcheck('a multi-word concept is not treated as a glyph', TagSearch.asGlyph('a smiling face') === null);
+
+// Known best matches. These are fixed by the dictionaries, so they pin the scoring.
+for (const [ch, dict, id, score] of [['L', 'aruco', 64, 0.88], ['U', '5x5_1000', 809, 0.92],
+                                     ['N', 'aruco', 1023, 0.92]]) {
+  const r = TagSearch.glyph(ch, ALL_DICTS, 1);
+  const top = r.results[0];
+  gcheck(`best "${ch}" is ${dict} #${id}`,
+         top && top.dict === dict && top.id === id && Math.abs(top.score - score) < 0.005,
+         top ? `${top.dict} #${top.id} at ${top.score.toFixed(2)}` : 'no result');
+}
+if (glyphFails) process.exitCode = 1;
+
 writeFileSync(path.join(root, 'tools', 'verify_dump.json'), JSON.stringify(out));
 console.log('dumped tools/verify_dump.json');
 

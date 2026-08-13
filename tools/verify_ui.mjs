@@ -62,7 +62,17 @@ let hits = await page.locator('.hit').count();
 console.log('sketch search hits:', hits, '|', await page.textContent('#searchStatus'));
 if (!hits) errors.push('sketch search returned nothing');
 
+// Letter search: routes to glyph matching and must search across dictionaries.
 await page.click('.tab[data-tab="concept"]');
+await page.selectOption('#searchDict', '*');
+await page.fill('#conceptQuery', 'letter L');
+await page.click('#conceptGo');
+await page.waitForTimeout(2500);
+const letterStatus = await page.textContent('#searchStatus');
+console.log('letter search:', await page.locator('.hit').count(), '|', letterStatus.slice(0, 90));
+if (!/letter "L"/.test(letterStatus)) errors.push(`letter query did not route to glyph: ${letterStatus}`);
+await page.screenshot({ path: path.join(outDir, 'search_letter.png') });
+
 await page.fill('#conceptQuery', 'checkerboard');
 await page.click('#conceptGo');
 await page.waitForTimeout(2500);           // first query pulls in the index
@@ -101,6 +111,20 @@ await page.waitForTimeout(400);
 const matrixCount = Number(await page.textContent('#cartCount'));
 console.log('cart after robustness matrix:', matrixCount);
 if (matrixCount !== 20) errors.push(`matrix added ${matrixCount} items, expected 20`);
+await page.click('#clearBtn');
+
+// ID range: one entry per id, at the current print size.
+await page.selectOption('#family', 'aruco');
+await page.waitForTimeout(200);
+await page.fill('input[placeholder="0-9, 12, 20-24"]', '3-7, 20');
+await page.click('text=Add range to sheet');
+await page.waitForTimeout(500);
+const rangeCount = Number(await page.textContent('#cartCount'));
+console.log('cart after id range 3-7,20:', rangeCount, '|', await page.textContent('#rangeNote'));
+if (rangeCount !== 6) errors.push(`id range added ${rangeCount} items, expected 6`);
+const rangeLabels = await page.locator('#cartList li span').allTextContents();
+if (!rangeLabels.some(t => /#3\b/.test(t)) || !rangeLabels.some(t => /#20\b/.test(t)))
+  errors.push('id range did not queue the expected ids');
 await page.click('#clearBtn');
 
 // Size sweep on AprilTag 36h11
