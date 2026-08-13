@@ -1,0 +1,15 @@
+# Downloaded on demand by tools/convert.py
+data/dict_raw.json
+tools/tag*.c
+tools/*.ref
+
+# Verification artifacts
+tools/verify_dump.json
+tools/verify_qr_dump.json
+tools/verify_qr_results.json
+tools/verify_sheet.pdf
+tools/verify_sheet.json
+tools/verify_sheet_page*.png
+tools/ref_imgs/
+tools/ui_out/
+tools/nested_out/
