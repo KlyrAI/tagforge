@@ -68,6 +68,45 @@ it with the actual devices you care about before settling on a configuration.
 **Add matrix to sheet** queues every ECC level against a list of tag sizes, so one printed
 page answers the question for your own hardware.
 
+## How small can a tag go?
+
+Detectors care about **camera pixels per module**, not millimetres, so that is the thing
+to measure. `tools/verify_limits.py` finds the threshold by rendering each family at
+decreasing sizes under random poses (up to 20° rotation, 15° tilt, sub-pixel offset) with
+optical blur and sensor noise, requiring 7 of 8 poses to decode.
+
+| family | modules | sharp (σ=0.4) | typical (σ=0.8) | soft (σ=1.5) |
+|--------|---------|---------------|-----------------|--------------|
+| AprilTag 16h5  | 6 | 2.0 px | 2.5 px | 4.0 px |
+| AprilTag 25h9  | 7 | 2.0 px | 3.0 px | 4.0 px |
+| AprilTag 36h10 | 8 | 2.5 px | 3.0 px | 5.0 px |
+| AprilTag 36h11 | 8 | 2.0 px | **2.5 px** | 4.0 px |
+| ArUco 4x4      | 6 | 2.5 px | 3.5 px | 6.5 px |
+| ArUco 6x6      | 8 | 2.5 px | 2.5 px | 4.0 px |
+| ArUco 7x7      | 9 | 2.0 px | 3.0 px | 4.5 px |
+
+So ~2.5 px per module for 36h11, meaning about **20 px across the black square**. Fewer
+data bits does not help much: 16h5 needs the same pixels per module and only wins because
+it has fewer modules — at the cost of a far weaker Hamming distance and many more false
+positives. 36h11 is the right default.
+
+Converting to print size — black-square width, at typical blur:
+
+| camera | 0.5 m | 1 m | 2 m | 5 m |
+|--------|-------|-----|-----|-----|
+| phone 1080p, 65° HFOV | 7 mm | 13 mm | 27 mm | 66 mm |
+| phone 4K, 65° HFOV | 3 mm | 7 mm | 13 mm | 33 mm |
+| tracking cam 720p, 90° HFOV | 16 mm | 31 mm | 62 mm | 156 mm |
+
+Add ~25% for the quiet zone to get a TagForge print size. Run the script with your own
+camera's resolution and field of view for numbers that match your setup.
+
+**Concealed tags need much more room**, because the hidden tag is only a third of the QR's
+width and the QR itself is the fragile part. A QR-H with a 35% tag needs roughly 180 px
+across the whole symbol — about 60 mm at 0.5 m on a 1080p phone, or 120 mm at 1 m. The
+hidden tag clears its own threshold at less than half that, so the QR is always what sets
+the size.
+
 ## Print files
 
 **Mint PDF** produces a vector PDF: true black fills, crop marks, per-tag labels, and a
@@ -118,6 +157,7 @@ Requires `opencv-python`, `numpy`, `pypdfium2`, and Node.
 ```
 node tools/verify.mjs     && python tools/verify.py       # bit-level correctness
 node tools/verify_qr.mjs  && python tools/verify_qr.py    # QR concealment robustness
+python tools/verify_limits.py                             # minimum detectable size
 node tools/verify_pdf.mjs && python tools/verify_pdf.py   # print geometry
 node tools/verify_ui.mjs                                  # browser smoke test (needs playwright)
 ```

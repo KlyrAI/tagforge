@@ -75,6 +75,8 @@ const leaf = { kind: 'grid', dict: TAG_DICT, id: TAG_ID };
 // — otherwise a RuneTag outer layer lands at a fraction of the resolution of a QR outer.
 const NEST_PX = 900;
 const stacks = {
+  'qr(30) > tag':      [qrL(30)],
+  'qr(40) > tag':      [qrL(40)],
   'qr > tag':          [qrL(35)],
   'runetag > tag':     [runeL()],
   'runetag > qr > tag': [runeL(), qrL(35)],
