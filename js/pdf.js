@@ -8,6 +8,21 @@ const PdfOut = (() => {
   // crop marks rather than sit alongside them.
   const LABEL_BASE = CROP_OFF + CROP + 2.5, LABEL_H = LABEL_BASE + 1.5;
 
+  /** Page sizes this tool offers, mm, portrait. */
+  const PAGE_MM = { letter: [215.9, 279.4], a4: [210, 297] };
+
+  /**
+   * The largest tile that can actually be placed on a page, mm.
+   *
+   * Exported so "fit to page" sizes a board against the REAL layout rather than
+   * a second copy of these constants — a duplicated margin would silently drift
+   * and produce boards that overflow or waste a centimetre.
+   */
+  function usableMm(pageFormat) {
+    const [pw, ph] = PAGE_MM[pageFormat] || PAGE_MM.letter;
+    return { w: pw - 2 * MARGIN, h: ph - 2 * MARGIN - FOOTER_H - LABEL_H };
+  }
+
   // items: [{tile, label}] ; physical size from SvgOut.physMm
   function mint(items, pageFormat) {
     const { jsPDF } = window.jspdf;
@@ -103,5 +118,5 @@ const PdfOut = (() => {
     doc.text('TagForge', pw - MARGIN, y + 4, { align: 'right' });
   }
 
-  return { mint };
+  return { mint, usableMm };
 })();

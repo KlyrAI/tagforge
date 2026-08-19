@@ -45,6 +45,108 @@
     cart: [],
   };
 
+  /**
+   * Blow the current board up to the largest that fits the selected page.
+   *
+   * A calibration/rig board wants to be as physically large as the paper
+   * allows: pose accuracy scales with how many pixels the board spans in the
+   * image, and marker decodability scales with the printed marker size. Both
+   * improve linearly with this, and nothing else on the sheet competes for the
+   * space — so "as big as it goes" is simply the right answer, and doing it by
+   * hand is arithmetic nobody should repeat.
+   *
+   * The grid COUNTS are left alone; only the cell size grows. That keeps the
+   * result predictable and keeps the dictionary's id usage unchanged.
+   *
+   * Rounded DOWN to 0.5mm: rounding up would overflow the printable area, and
+   * the exactness that makes a printed board trustworthy comes from the
+   * generator laying an exact grid, not from the cell being a round number.
+   */
+  function fitBoardToPage() {
+    const usable = PdfOut.usableMm(state.page);
+    if (state.family === 'charuco') {
+      const ch = state.charuco;
+      // Preserve the marker/square ratio the user already chose; the marker has
+      // to stay inside its square with a white border, so it cannot simply
+      // track the square 1:1.
+      const ratio = ch.squareMm > 0 ? ch.markerMm / ch.squareMm : 0.75;
+      const square = Math.min(
+        (usable.w - 2 * ch.quietMm) / ch.sx,
+        (usable.h - 2 * ch.quietMm) / ch.sy,
+      );
+      ch.squareMm = Math.max(5, Math.floor(square * 2) / 2);
+      ch.markerMm = Math.max(3, Math.floor(ch.squareMm * ratio * 2) / 2);
+    } else if (state.family === 'gridboard') {
+      const g = state.grid;
+      const marker = Math.min(
+        (usable.w - 2 * g.quietMm - (g.mx - 1) * g.sepMm) / g.mx,
+        (usable.h - 2 * g.quietMm - (g.my - 1) * g.sepMm) / g.my,
+      );
+      g.markerMm = Math.max(5, Math.floor(marker * 2) / 2);
+    }
+    renderControls();
+    update();
+  }
+
+  /**
+   * Printed extent of the current board, mm — what fitBoardToPage maximises.
+   * Mirrors the tile geometry in render.js.
+   */
+  function boardExtentMm() {
+    if (state.family === 'charuco') {
+      const c = state.charuco;
+      return { w: c.sx * c.squareMm + 2 * c.quietMm, h: c.sy * c.squareMm + 2 * c.quietMm };
+    }
+    if (state.family === 'gridboard') {
+      const g = state.grid;
+      return {
+        w: g.mx * g.markerMm + (g.mx - 1) * g.sepMm + 2 * g.quietMm,
+        h: g.my * g.markerMm + (g.my - 1) * g.sepMm + 2 * g.quietMm,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Roughly how far this board's MARKERS stay decodable.
+   *
+   * A marker needs about 15px across to decode, and px = focal_px * size /
+   * distance. A phone main camera is ~26mm equivalent, so on a 4000px-wide
+   * still focal_px ~= 3000. Deliberately approximate — it exists to catch
+   * "these markers are far too small for the room" before you print, not to
+   * predict a threshold.
+   */
+  function markerRangeM(markerMm) {
+    if (!(markerMm > 0)) return null;
+    return (3000 * (markerMm / 1000)) / 15;
+  }
+
+  /**
+   * "Fit to page" button plus the sizing facts that decide whether the result
+   * is usable: printed extent, marker size, and the range those markers hold.
+   */
+  function fitControls() {
+    const wrap = el('div', {});
+    const btn = el('button', {}, `Fit to ${state.page === 'a4' ? 'A4' : 'US Letter'}`);
+    btn.onclick = () => fitBoardToPage();
+    const br = el('div', { className: 'btnrow' });
+    br.appendChild(btn);
+    wrap.appendChild(br);
+
+    const extent = boardExtentMm();
+    const markerMm = state.family === 'charuco' ? state.charuco.markerMm : state.grid.markerMm;
+    const range = markerRangeM(markerMm);
+    const usable = PdfOut.usableMm(state.page);
+    const overflows = extent && (extent.w > usable.w + 0.01 || extent.h > usable.h + 0.01);
+    wrap.appendChild(el('p', { className: 'hint' },
+      (extent ? `Printed ${extent.w.toFixed(1)} x ${extent.h.toFixed(1)} mm ` +
+                `(page fits ${usable.w.toFixed(1)} x ${usable.h.toFixed(1)} mm). ` : '') +
+      (range ? `${markerMm} mm markers decode to roughly ${range.toFixed(1)} m. ` : '') +
+      (overflows ? 'TOO BIG — this board will be skipped when the sheet is minted.'
+                 : 'Bigger is strictly better for pose accuracy and range; nothing else competes for the sheet.')));
+    return wrap;
+  }
+
   // ---- tile construction ----
   function currentTile() {
     switch (state.family) {
@@ -339,6 +441,7 @@
       const leg = el('input', { type: 'checkbox', checked: ch.legacy });
       leg.onchange = () => { ch.legacy = leg.checked; update(); };
       c.appendChild(row('Legacy pattern (OpenCV <4.6)', leg));
+      c.appendChild(fitControls());
     } else if (f === 'gridboard') {
       const g = state.grid;
       c.appendChild(row('Dictionary', dictSelect(ARUCO_KEYS, state.dict, v => state.dict = v)));
@@ -348,6 +451,7 @@
       c.appendChild(row('Separation (mm)', numInput(g.sepMm, 1, 50, 1, v => g.sepMm = v)));
       c.appendChild(row('First ID', numInput(g.firstId, 0, 999, 1, v => g.firstId = v)));
       c.appendChild(row('Quiet zone (mm)', numInput(g.quietMm, 0, 30, 1, v => g.quietMm = v)));
+      c.appendChild(fitControls());
     }
 
     const isBoard = f === 'charuco' || f === 'gridboard';
